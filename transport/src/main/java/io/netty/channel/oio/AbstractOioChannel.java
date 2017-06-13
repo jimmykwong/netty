@@ -21,7 +21,6 @@ import io.netty.channel.ChannelPromise;
 import io.netty.channel.EventLoop;
 import io.netty.channel.ThreadPerChannelEventLoop;
 
-import java.net.ConnectException;
 import java.net.SocketAddress;
 
 /**
@@ -31,13 +30,17 @@ public abstract class AbstractOioChannel extends AbstractChannel {
 
     protected static final int SO_TIMEOUT = 1000;
 
-    private boolean readInProgress;
-
+    boolean readPending;
     private final Runnable readTask = new Runnable() {
         @Override
         public void run() {
-            readInProgress = false;
             doRead();
+        }
+    };
+    private final Runnable clearReadPendingRunnable = new Runnable() {
+        @Override
+        public void run() {
+            readPending = false;
         }
     };
 
@@ -58,30 +61,25 @@ public abstract class AbstractOioChannel extends AbstractChannel {
         public void connect(
                 final SocketAddress remoteAddress,
                 final SocketAddress localAddress, final ChannelPromise promise) {
-            if (!ensureOpen(promise)) {
-                return;
-            }
-
-            if (!promise.setUncancellable()) {
-                close(voidPromise());
+            if (!promise.setUncancellable() || !ensureOpen(promise)) {
                 return;
             }
 
             try {
                 boolean wasActive = isActive();
                 doConnect(remoteAddress, localAddress);
-                promise.setSuccess();
-                if (!wasActive && isActive()) {
+
+                // Get the state as trySuccess() may trigger an ChannelFutureListener that will close the Channel.
+                // We still need to ensure we call fireChannelActive() in this case.
+                boolean active = isActive();
+
+                safeSetSuccess(promise);
+                if (!wasActive && active) {
                     pipeline().fireChannelActive();
                 }
             } catch (Throwable t) {
-                if (t instanceof ConnectException) {
-                    Throwable newT = new ConnectException(t.getMessage() + ": " + remoteAddress);
-                    newT.setStackTrace(t.getStackTrace());
-                    t = newT;
-                }
+                safeSetFailure(promise, annotateConnectException(t, remoteAddress));
                 closeIfClosed();
-                promise.setFailure(t);
             }
         }
     }
@@ -99,13 +97,62 @@ public abstract class AbstractOioChannel extends AbstractChannel {
 
     @Override
     protected void doBeginRead() throws Exception {
-        if (readInProgress) {
+        if (readPending) {
             return;
         }
 
-        readInProgress = true;
+        readPending = true;
         eventLoop().execute(readTask);
     }
 
     protected abstract void doRead();
+
+    /**
+     * @deprecated No longer supported.
+     * No longer supported.
+     */
+    @Deprecated
+    protected boolean isReadPending() {
+        return readPending;
+    }
+
+    /**
+     * @deprecated Use {@link #clearReadPending()} if appropriate instead.
+     * No longer supported.
+     */
+    @Deprecated
+    protected void setReadPending(final boolean readPending) {
+        if (isRegistered()) {
+            EventLoop eventLoop = eventLoop();
+            if (eventLoop.inEventLoop()) {
+                this.readPending = readPending;
+            } else {
+                eventLoop.execute(new Runnable() {
+                    @Override
+                    public void run() {
+                        AbstractOioChannel.this.readPending = readPending;
+                    }
+                });
+            }
+        } else {
+            this.readPending = readPending;
+        }
+    }
+
+    /**
+     * Set read pending to {@code false}.
+     */
+    protected final void clearReadPending() {
+        if (isRegistered()) {
+            EventLoop eventLoop = eventLoop();
+            if (eventLoop.inEventLoop()) {
+                readPending = false;
+            } else {
+                eventLoop.execute(clearReadPendingRunnable);
+            }
+        } else {
+            // Best effort if we are not registered yet clear readPending. This happens during channel initialization.
+            readPending = false;
+        }
+    }
 }

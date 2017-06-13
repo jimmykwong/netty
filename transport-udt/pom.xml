@@ -21,11 +21,11 @@
   <parent>
     <groupId>io.netty</groupId>
     <artifactId>netty-parent</artifactId>
-    <version>4.0.8.Final-SNAPSHOT</version>
+    <version>4.1.13.Final-SNAPSHOT</version>
   </parent>
 
   <artifactId>netty-transport-udt</artifactId>
-  <packaging>bundle</packaging>
+  <packaging>jar</packaging>
 
   <name>Netty/Transport/UDT</name>
 
@@ -60,12 +60,6 @@
     </dependency>
 
     <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-api</artifactId>
-      <scope>test</scope>
-    </dependency>
-
-    <dependency>
       <groupId>com.google.caliper</groupId>
       <artifactId>caliper</artifactId>
       <scope>test</scope>
@@ -75,7 +69,6 @@
 
   <build>
     <plugins>
-
       <!-- run each test in separate JVM -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -84,21 +77,6 @@
           <forkMode>always</forkMode>
         </configuration>
       </plugin>
-
-
-      <!-- attach and deploy tests artifact -->
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-jar-plugin</artifactId>
-        <executions>
-          <execution>
-            <goals>
-              <goal>test-jar</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
-
     </plugins>
   </build>
 </project>

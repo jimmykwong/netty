@@ -68,28 +68,38 @@ public class AbstractMemoryHttpDataTest {
          * @param charset Used charset for data decoding.
          * @param size    Expected data block size.
          */
-        protected TestHttpData(String name, Charset charset, long size) {
+        private TestHttpData(String name, Charset charset, long size) {
             super(name, charset, size);
         }
 
         @Override
         public InterfaceHttpData.HttpDataType getHttpDataType() {
-            throw new UnsupportedOperationException("Should never be called.");
+            throw reject();
         }
 
         @Override
         public HttpData copy() {
-            throw new UnsupportedOperationException("Should never be called.");
+            throw reject();
         }
 
         @Override
         public HttpData duplicate() {
-            throw new UnsupportedOperationException("Should never be called.");
+            throw reject();
+        }
+
+        @Override
+        public HttpData retainedDuplicate() {
+            throw reject();
+        }
+
+        @Override
+        public HttpData replace(ByteBuf content) {
+            return null;
         }
 
         @Override
         public int compareTo(InterfaceHttpData o) {
-            throw new UnsupportedOperationException("Should never be called.");
+            throw reject();
         }
 
         @Override
@@ -100,6 +110,10 @@ public class AbstractMemoryHttpDataTest {
         @Override
         public boolean equals(Object obj) {
             return super.equals(obj);
+        }
+
+        private static UnsupportedOperationException reject() {
+            throw new UnsupportedOperationException("Should never be called.");
         }
     }
 }

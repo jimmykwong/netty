@@ -20,6 +20,7 @@ import com.sun.nio.sctp.SctpServerChannel;
 import io.netty.channel.ChannelException;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelMetadata;
+import io.netty.channel.ChannelOutboundBuffer;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.nio.AbstractNioMessageChannel;
 import io.netty.channel.sctp.DefaultSctpServerChannelConfig;
@@ -45,7 +46,7 @@ import java.util.Set;
  */
 public class NioSctpServerChannel extends AbstractNioMessageChannel
         implements io.netty.channel.sctp.SctpServerChannel {
-    private static final ChannelMetadata METADATA = new ChannelMetadata(false);
+    private static final ChannelMetadata METADATA = new ChannelMetadata(false, 16);
 
     private static SctpServerChannel newSocket() {
         try {
@@ -63,7 +64,7 @@ public class NioSctpServerChannel extends AbstractNioMessageChannel
      */
     public NioSctpServerChannel() {
         super(null, newSocket(), SelectionKey.OP_ACCEPT);
-        config = new DefaultSctpServerChannelConfig(this, javaChannel());
+        config = new NioSctpServerChannelConfig(this, javaChannel());
     }
 
     @Override
@@ -80,7 +81,7 @@ public class NioSctpServerChannel extends AbstractNioMessageChannel
                 addresses.add((InetSocketAddress) socketAddress);
             }
             return addresses;
-        } catch (Throwable t) {
+        } catch (Throwable ignored) {
             return Collections.emptySet();
         }
     }
@@ -216,7 +217,23 @@ public class NioSctpServerChannel extends AbstractNioMessageChannel
     }
 
     @Override
-    protected boolean doWriteMessage(Object msg) throws Exception {
+    protected boolean doWriteMessage(Object msg, ChannelOutboundBuffer in) throws Exception {
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    protected Object filterOutboundMessage(Object msg) throws Exception {
+        throw new UnsupportedOperationException();
+    }
+
+    private final class NioSctpServerChannelConfig extends DefaultSctpServerChannelConfig {
+        private NioSctpServerChannelConfig(NioSctpServerChannel channel, SctpServerChannel javaChannel) {
+            super(channel, javaChannel);
+        }
+
+        @Override
+        protected void autoReadCleared() {
+            clearReadPending();
+        }
     }
 }

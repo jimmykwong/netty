@@ -19,22 +19,31 @@ import io.netty.util.CharsetUtil;
 
 import java.net.URI;
 import java.net.URLDecoder;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CoderResult;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static io.netty.util.internal.ObjectUtil.*;
+import static io.netty.util.internal.StringUtil.*;
+import static io.netty.buffer.ByteBufUtil.decodeHexByte;
+
 /**
  * Splits an HTTP query string into a path string and key-value parameter pairs.
  * This decoder is for one time use only.  Create a new instance for each URI:
  * <pre>
  * {@link QueryStringDecoder} decoder = new {@link QueryStringDecoder}("/hello?recipient=world&x=1;y=2");
- * assert decoder.getPath().equals("/hello");
- * assert decoder.getParameters().get("recipient").get(0).equals("world");
- * assert decoder.getParameters().get("x").get(0).equals("1");
- * assert decoder.getParameters().get("y").get(0).equals("2");
+ * assert decoder.path().equals("/hello");
+ * assert decoder.parameters().get("recipient").get(0).equals("world");
+ * assert decoder.parameters().get("x").get(0).equals("1");
+ * assert decoder.parameters().get("y").get(0).equals("2");
  * </pre>
  *
  * This decoder can also decode the content of an HTTP POST request whose
@@ -46,7 +55,7 @@ import java.util.Map;
  *
  * <h3>HashDOS vulnerability fix</h3>
  *
- * As a workaround to the <a href="http://goo.gl/I4Nky">HashDOS</a> vulnerability, the decoder
+ * As a workaround to the <a href="http://netty.io/s/hashdos">HashDOS</a> vulnerability, the decoder
  * limits the maximum number of decoded key-value parameter pairs, up to {@literal 1024} by
  * default, and you can configure it when you construct the decoder by passing an additional
  * integer parameter.
@@ -59,11 +68,10 @@ public class QueryStringDecoder {
 
     private final Charset charset;
     private final String uri;
-    private final boolean hasPath;
     private final int maxParams;
+    private int pathEndIdx;
     private String path;
     private Map<String, List<String>> params;
-    private int nParams;
 
     /**
      * Creates a new decoder that decodes the specified URI. The decoder will
@@ -102,22 +110,12 @@ public class QueryStringDecoder {
      * specified charset.
      */
     public QueryStringDecoder(String uri, Charset charset, boolean hasPath, int maxParams) {
-        if (uri == null) {
-            throw new NullPointerException("getUri");
-        }
-        if (charset == null) {
-            throw new NullPointerException("charset");
-        }
-        if (maxParams <= 0) {
-            throw new IllegalArgumentException(
-                    "maxParams: " + maxParams + " (expected: a positive integer)");
-        }
+        this.uri = checkNotNull(uri, "uri");
+        this.charset = checkNotNull(charset, "charset");
+        this.maxParams = checkPositive(maxParams, "maxParams");
 
-        // http://en.wikipedia.org/wiki/Query_string
-        this.uri = uri.replace(';', '&');
-        this.charset = charset;
-        this.maxParams = maxParams;
-        this.hasPath = hasPath;
+        // `-1` means that path end index will be initialized lazily
+        pathEndIdx = hasPath ? -1 : 0;
     }
 
     /**
@@ -141,31 +139,28 @@ public class QueryStringDecoder {
      * specified charset.
      */
     public QueryStringDecoder(URI uri, Charset charset, int maxParams) {
-        if (uri == null) {
-            throw new NullPointerException("getUri");
-        }
-        if (charset == null) {
-            throw new NullPointerException("charset");
-        }
-        if (maxParams <= 0) {
-            throw new IllegalArgumentException(
-                    "maxParams: " + maxParams + " (expected: a positive integer)");
-        }
-
         String rawPath = uri.getRawPath();
-        if (rawPath != null) {
-            hasPath = true;
-        } else {
-            rawPath = "";
-            hasPath = false;
+        if (rawPath == null) {
+            rawPath = EMPTY_STRING;
         }
+        String rawQuery = uri.getRawQuery();
         // Also take care of cut of things like "http://localhost"
-        String newUri = rawPath + '?' + uri.getRawQuery();
+        this.uri = rawQuery == null? rawPath : rawPath + '?' + rawQuery;
+        this.charset = checkNotNull(charset, "charset");
+        this.maxParams = checkPositive(maxParams, "maxParams");
+        pathEndIdx = rawPath.length();
+    }
 
-        // http://en.wikipedia.org/wiki/Query_string
-        this.uri = newUri.replace(';', '&');
-        this.charset = charset;
-        this.maxParams = maxParams;
+    @Override
+    public String toString() {
+        return uri();
+    }
+
+    /**
+     * Returns the uri used to initialize this {@link QueryStringDecoder}.
+     */
+    public String uri() {
+        return uri;
     }
 
     /**
@@ -173,16 +168,7 @@ public class QueryStringDecoder {
      */
     public String path() {
         if (path == null) {
-            if (!hasPath) {
-                return path = "";
-            }
-
-            int pathEndPos = uri.indexOf('?');
-            if (pathEndPos < 0) {
-                path = uri;
-            } else {
-                return path = uri.substring(0, pathEndPos);
-            }
+            path = decodeComponent(uri, 0, pathEndIdx(), charset, true);
         }
         return path;
     }
@@ -192,77 +178,76 @@ public class QueryStringDecoder {
      */
     public Map<String, List<String>> parameters() {
         if (params == null) {
-            if (hasPath) {
-                int pathLength = path().length();
-                if (uri.length() == pathLength) {
-                    return Collections.emptyMap();
-                }
-                decodeParams(uri.substring(pathLength + 1));
-            } else {
-                if (uri.isEmpty()) {
-                    return Collections.emptyMap();
-                }
-                decodeParams(uri);
-            }
+            params = decodeParams(uri, pathEndIdx(), charset, maxParams);
         }
         return params;
     }
 
-    private void decodeParams(String s) {
-        Map<String, List<String>> params = this.params = new LinkedHashMap<String, List<String>>();
-        nParams = 0;
-        String name = null;
-        int pos = 0; // Beginning of the unprocessed region
-        int i;       // End of the unprocessed region
-        char c;  // Current character
-        for (i = 0; i < s.length(); i++) {
-            c = s.charAt(i);
-            if (c == '=' && name == null) {
-                if (pos != i) {
-                    name = decodeComponent(s.substring(pos, i), charset);
-                }
-                pos = i + 1;
-            } else if (c == '&') {
-                if (name == null && pos != i) {
-                    // We haven't seen an `=' so far but moved forward.
-                    // Must be a param of the form '&a&' so add it with
-                    // an empty value.
-                    if (!addParam(params, decodeComponent(s.substring(pos, i), charset), "")) {
-                        return;
-                    }
-                } else if (name != null) {
-                    if (!addParam(params, name, decodeComponent(s.substring(pos, i), charset))) {
-                        return;
-                    }
-                    name = null;
-                }
-                pos = i + 1;
-            }
+    private int pathEndIdx() {
+        if (pathEndIdx == -1) {
+            pathEndIdx = findPathEndIndex(uri);
         }
-
-        if (pos != i) {  // Are there characters we haven't dealt with?
-            if (name == null) {     // Yes and we haven't seen any `='.
-                addParam(params, decodeComponent(s.substring(pos, i), charset), "");
-            } else {                // Yes and this must be the last value.
-                addParam(params, name, decodeComponent(s.substring(pos, i), charset));
-            }
-        } else if (name != null) {  // Have we seen a name without value?
-            addParam(params, name, "");
-        }
+        return pathEndIdx;
     }
 
-    private boolean addParam(Map<String, List<String>> params, String name, String value) {
-        if (nParams >= maxParams) {
+    private static Map<String, List<String>> decodeParams(String s, int from, Charset charset, int paramsLimit) {
+        int len = s.length();
+        if (from >= len) {
+            return Collections.emptyMap();
+        }
+        if (s.charAt(from) == '?') {
+            from++;
+        }
+        Map<String, List<String>> params = new LinkedHashMap<String, List<String>>();
+        int nameStart = from;
+        int valueStart = -1;
+        int i;
+        loop:
+        for (i = from; i < len; i++) {
+            switch (s.charAt(i)) {
+            case '=':
+                if (nameStart == i) {
+                    nameStart = i + 1;
+                } else if (valueStart < nameStart) {
+                    valueStart = i + 1;
+                }
+                break;
+            case '&':
+            case ';':
+                if (addParam(s, nameStart, valueStart, i, params, charset)) {
+                    paramsLimit--;
+                    if (paramsLimit == 0) {
+                        return params;
+                    }
+                }
+                nameStart = i + 1;
+                break;
+            case '#':
+                break loop;
+            default:
+                // continue
+            }
+        }
+        addParam(s, nameStart, valueStart, i, params, charset);
+        return params;
+    }
+
+    private static boolean addParam(String s, int nameStart, int valueStart, int valueEnd,
+                                    Map<String, List<String>> params, Charset charset) {
+        if (nameStart >= valueEnd) {
             return false;
         }
-
+        if (valueStart <= nameStart) {
+            valueStart = valueEnd + 1;
+        }
+        String name = decodeComponent(s, nameStart, valueStart - 1, charset, false);
+        String value = decodeComponent(s, valueStart, valueEnd, charset, false);
         List<String> values = params.get(name);
         if (values == null) {
             values = new ArrayList<String>(1);  // Often there's only 1 value.
             params.put(name, values);
         }
         values.add(value);
-        nParams ++;
         return true;
     }
 
@@ -291,7 +276,7 @@ public class QueryStringDecoder {
      * {@code 0xC3 0xA9}) is encoded as {@code %C3%A9} or {@code %c3%a9}.
      * <p>
      * This is essentially equivalent to calling
-     *   {@link URLDecoder#decode(String, String) URLDecoder.decode(s, charset.name())}
+     *   {@link URLDecoder#decode(String, String)}
      * except that it's over 2x faster and generates less garbage for the GC.
      * Actually this function doesn't allocate any memory if there's nothing
      * to decode, the argument itself is returned.
@@ -303,84 +288,84 @@ public class QueryStringDecoder {
      * @throws IllegalArgumentException if the string contains a malformed
      * escape sequence.
      */
-    @SuppressWarnings("fallthrough")
-    public static String decodeComponent(final String s,
-                                         final Charset charset) {
+    public static String decodeComponent(final String s, final Charset charset) {
         if (s == null) {
-            return "";
+            return EMPTY_STRING;
         }
-        final int size = s.length();
-        boolean modified = false;
-        for (int i = 0; i < size; i++) {
-            final char c = s.charAt(i);
-            switch (c) {
-                case '%':
-                    i++;  // We can skip at least one char, e.g. `%%'.
-                    // Fall through.
-                case '+':
-                    modified = true;
-                    break;
-            }
-        }
-        if (!modified) {
-            return s;
-        }
-        final byte[] buf = new byte[size];
-        int pos = 0;  // position in `buf'.
-        for (int i = 0; i < size; i++) {
-            char c = s.charAt(i);
-            switch (c) {
-                case '+':
-                    buf[pos++] = ' ';  // "+" -> " "
-                    break;
-                case '%':
-                    if (i == size - 1) {
-                        throw new IllegalArgumentException("unterminated escape"
-                                + " sequence at end of string: " + s);
-                    }
-                    c = s.charAt(++i);
-                    if (c == '%') {
-                        buf[pos++] = '%';  // "%%" -> "%"
-                        break;
-                    }
-                    if (i == size - 1) {
-                        throw new IllegalArgumentException("partial escape"
-                                + " sequence at end of string: " + s);
-                    }
-                    c = decodeHexNibble(c);
-                    final char c2 = decodeHexNibble(s.charAt(++i));
-                    if (c == Character.MAX_VALUE || c2 == Character.MAX_VALUE) {
-                        throw new IllegalArgumentException(
-                                "invalid escape sequence `%" + s.charAt(i - 1)
-                                + s.charAt(i) + "' at index " + (i - 2)
-                                + " of: " + s);
-                    }
-                    c = (char) (c * 16 + c2);
-                    // Fall through.
-                default:
-                    buf[pos++] = (byte) c;
-                    break;
-            }
-        }
-        return new String(buf, 0, pos, charset);
+        return decodeComponent(s, 0, s.length(), charset, false);
     }
 
-    /**
-     * Helper to decode half of a hexadecimal number from a string.
-     * @param c The ASCII character of the hexadecimal number to decode.
-     * Must be in the range {@code [0-9a-fA-F]}.
-     * @return The hexadecimal value represented in the ASCII character
-     * given, or {@link Character#MAX_VALUE} if the character is invalid.
-     */
-    private static char decodeHexNibble(final char c) {
-        if ('0' <= c && c <= '9') {
-            return (char) (c - '0');
-        } else if ('a' <= c && c <= 'f') {
-            return (char) (c - 'a' + 10);
-        } else if ('A' <= c && c <= 'F') {
-            return (char) (c - 'A' + 10);
-        } else {
-            return Character.MAX_VALUE;
+    private static String decodeComponent(String s, int from, int toExcluded, Charset charset, boolean isPath) {
+        int len = toExcluded - from;
+        if (len <= 0) {
+            return EMPTY_STRING;
         }
+        int firstEscaped = -1;
+        for (int i = from; i < toExcluded; i++) {
+            char c = s.charAt(i);
+            if (c == '%' || c == '+' && !isPath) {
+                firstEscaped = i;
+                break;
+            }
+        }
+        if (firstEscaped == -1) {
+            return s.substring(from, toExcluded);
+        }
+
+        CharsetDecoder decoder = CharsetUtil.decoder(charset);
+
+        // Each encoded byte takes 3 characters (e.g. "%20")
+        int decodedCapacity = (toExcluded - firstEscaped) / 3;
+        ByteBuffer byteBuf = ByteBuffer.allocate(decodedCapacity);
+        CharBuffer charBuf = CharBuffer.allocate(decodedCapacity);
+
+        StringBuilder strBuf = new StringBuilder(len);
+        strBuf.append(s, from, firstEscaped);
+
+        for (int i = firstEscaped; i < toExcluded; i++) {
+            char c = s.charAt(i);
+            if (c != '%') {
+                strBuf.append(c != '+' || isPath? c : SPACE);
+                continue;
+            }
+
+            byteBuf.clear();
+            do {
+                if (i + 3 > toExcluded) {
+                    throw new IllegalArgumentException("unterminated escape sequence at index " + i + " of: " + s);
+                }
+                byteBuf.put(decodeHexByte(s, i + 1));
+                i += 3;
+            } while (i < toExcluded && s.charAt(i) == '%');
+            i--;
+
+            byteBuf.flip();
+            charBuf.clear();
+            CoderResult result = decoder.reset().decode(byteBuf, charBuf, true);
+            try {
+                if (!result.isUnderflow()) {
+                    result.throwException();
+                }
+                result = decoder.flush(charBuf);
+                if (!result.isUnderflow()) {
+                    result.throwException();
+                }
+            } catch (CharacterCodingException ex) {
+                throw new IllegalStateException(ex);
+            }
+            strBuf.append(charBuf.flip());
+        }
+        return strBuf.toString();
+    }
+
+    private static int findPathEndIndex(String uri) {
+        int len = uri.length();
+        for (int i = 0; i < len; i++) {
+            char c = uri.charAt(i);
+            if (c == '?' || c == '#') {
+                return i;
+            }
+        }
+        return len;
     }
 }

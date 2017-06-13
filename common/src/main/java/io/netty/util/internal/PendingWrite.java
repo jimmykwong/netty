@@ -25,7 +25,7 @@ import io.netty.util.concurrent.Promise;
 public final class PendingWrite {
     private static final Recycler<PendingWrite> RECYCLER = new Recycler<PendingWrite>() {
         @Override
-        protected PendingWrite newObject(Handle handle) {
+        protected PendingWrite newObject(Handle<PendingWrite> handle) {
             return new PendingWrite(handle);
         }
     };
@@ -40,11 +40,11 @@ public final class PendingWrite {
         return pending;
     }
 
-    private final Recycler.Handle handle;
+    private final Recycler.Handle<PendingWrite> handle;
     private Object msg;
     private Promise<Void> promise;
 
-    private PendingWrite(Recycler.Handle handle) {
+    private PendingWrite(Recycler.Handle<PendingWrite> handle) {
         this.handle = handle;
     }
 
@@ -54,11 +54,12 @@ public final class PendingWrite {
     public boolean recycle() {
         msg = null;
         promise = null;
-        return RECYCLER.recycle(this, handle);
+        handle.recycle(this);
+        return true;
     }
 
     /**
-     * Fails the underlying {@link Promise} with the given cause and reycle this instance.
+     * Fails the underlying {@link Promise} with the given cause and recycle this instance.
      */
     public boolean failAndRecycle(Throwable cause) {
         ReferenceCountUtil.release(msg);
@@ -69,7 +70,7 @@ public final class PendingWrite {
     }
 
     /**
-     * Mark the underlying {@link Promise} successed and reycle this instance.
+     * Mark the underlying {@link Promise} successfully and recycle this instance.
      */
     public boolean successAndRecycle() {
         if (promise != null) {

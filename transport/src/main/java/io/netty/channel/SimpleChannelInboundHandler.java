@@ -28,15 +28,22 @@ import io.netty.util.internal.TypeParameterMatcher;
  *             {@link SimpleChannelInboundHandler}&lt;{@link String}&gt; {
  *
  *         {@code @Override}
- *         public void messageReceived({@link ChannelHandlerContext} ctx, {@link String} message)
+ *         protected void channelRead0({@link ChannelHandlerContext} ctx, {@link String} message)
  *                 throws {@link Exception} {
  *             System.out.println(message);
  *         }
  *     }
  * </pre>
  *
- * Be aware that depending of the constructor parameters it will release all handled messages.
+ * Be aware that depending of the constructor parameters it will release all handled messages by passing them to
+ * {@link ReferenceCountUtil#release(Object)}. In this case you may need to use
+ * {@link ReferenceCountUtil#retain(Object)} if you pass the object to the next handler in the {@link ChannelPipeline}.
  *
+ * <h3>Forward compatibility notice</h3>
+ * <p>
+ * Please keep in mind that {@link #channelRead0(ChannelHandlerContext, I)} will be renamed to
+ * {@code messageReceived(ChannelHandlerContext, I)} in 5.0.
+ * </p>
  */
 public abstract class SimpleChannelInboundHandler<I> extends ChannelInboundHandlerAdapter {
 
@@ -44,7 +51,7 @@ public abstract class SimpleChannelInboundHandler<I> extends ChannelInboundHandl
     private final boolean autoRelease;
 
     /**
-     * @see {@link #SimpleChannelInboundHandler(boolean)} with {@code true} as boolean parameter.
+     * see {@link #SimpleChannelInboundHandler(boolean)} with {@code true} as boolean parameter.
      */
     protected SimpleChannelInboundHandler() {
         this(true);
@@ -53,7 +60,7 @@ public abstract class SimpleChannelInboundHandler<I> extends ChannelInboundHandl
     /**
      * Create a new instance which will try to detect the types to match out of the type parameter of the class.
      *
-     * @param autoRelease   {@code true} if handled messages should be released automatically by pass them to
+     * @param autoRelease   {@code true} if handled messages should be released automatically by passing them to
      *                      {@link ReferenceCountUtil#release(Object)}.
      */
     protected SimpleChannelInboundHandler(boolean autoRelease) {
@@ -62,7 +69,7 @@ public abstract class SimpleChannelInboundHandler<I> extends ChannelInboundHandl
     }
 
     /**
-     * @see {@link #SimpleChannelInboundHandler(Class, boolean)} with {@code true} as boolean value.
+     * see {@link #SimpleChannelInboundHandler(Class, boolean)} with {@code true} as boolean value.
      */
     protected SimpleChannelInboundHandler(Class<? extends I> inboundMessageType) {
         this(inboundMessageType, true);
@@ -72,7 +79,7 @@ public abstract class SimpleChannelInboundHandler<I> extends ChannelInboundHandl
      * Create a new instance
      *
      * @param inboundMessageType    The type of messages to match
-     * @param autoRelease           {@code true} if handled messages should be released automatically by pass them to
+     * @param autoRelease           {@code true} if handled messages should be released automatically by passing them to
      *                              {@link ReferenceCountUtil#release(Object)}.
      */
     protected SimpleChannelInboundHandler(Class<? extends I> inboundMessageType, boolean autoRelease) {
@@ -108,6 +115,9 @@ public abstract class SimpleChannelInboundHandler<I> extends ChannelInboundHandl
     }
 
     /**
+     * <strong>Please keep in mind that this method will be renamed to
+     * {@code messageReceived(ChannelHandlerContext, I)} in 5.0.</strong>
+     *
      * Is called for each message of type {@link I}.
      *
      * @param ctx           the {@link ChannelHandlerContext} which this {@link SimpleChannelInboundHandler}

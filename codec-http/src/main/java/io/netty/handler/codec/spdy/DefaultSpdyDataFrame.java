@@ -80,14 +80,22 @@ public class DefaultSpdyDataFrame extends DefaultSpdyStreamFrame implements Spdy
 
     @Override
     public SpdyDataFrame copy() {
-        SpdyDataFrame frame = new DefaultSpdyDataFrame(getStreamId(), content().copy());
-        frame.setLast(isLast());
-        return frame;
+        return replace(content().copy());
     }
 
     @Override
     public SpdyDataFrame duplicate() {
-        SpdyDataFrame frame = new DefaultSpdyDataFrame(getStreamId(), content().duplicate());
+        return replace(content().duplicate());
+    }
+
+    @Override
+    public SpdyDataFrame retainedDuplicate() {
+        return replace(content().retainedDuplicate());
+    }
+
+    @Override
+    public SpdyDataFrame replace(ByteBuf content) {
+        SpdyDataFrame frame = new DefaultSpdyDataFrame(streamId(), content);
         frame.setLast(isLast());
         return frame;
     }
@@ -110,6 +118,18 @@ public class DefaultSpdyDataFrame extends DefaultSpdyStreamFrame implements Spdy
     }
 
     @Override
+    public SpdyDataFrame touch() {
+        data.touch();
+        return this;
+    }
+
+    @Override
+    public SpdyDataFrame touch(Object hint) {
+        data.touch(hint);
+        return this;
+    }
+
+    @Override
     public boolean release() {
         return data.release();
     }
@@ -121,16 +141,16 @@ public class DefaultSpdyDataFrame extends DefaultSpdyStreamFrame implements Spdy
 
     @Override
     public String toString() {
-        StringBuilder buf = new StringBuilder();
-        buf.append(getClass().getSimpleName());
-        buf.append("(last: ");
-        buf.append(isLast());
-        buf.append(')');
-        buf.append(StringUtil.NEWLINE);
-        buf.append("--> Stream-ID = ");
-        buf.append(getStreamId());
-        buf.append(StringUtil.NEWLINE);
-        buf.append("--> Size = ");
+        StringBuilder buf = new StringBuilder()
+            .append(StringUtil.simpleClassName(this))
+            .append("(last: ")
+            .append(isLast())
+            .append(')')
+            .append(StringUtil.NEWLINE)
+            .append("--> Stream-ID = ")
+            .append(streamId())
+            .append(StringUtil.NEWLINE)
+            .append("--> Size = ");
         if (refCnt() == 0) {
             buf.append("(freed)");
         } else {

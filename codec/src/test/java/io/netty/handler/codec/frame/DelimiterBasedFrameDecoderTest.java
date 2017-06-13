@@ -44,8 +44,10 @@ public class DelimiterBasedFrameDecoderTest {
             }
 
             ch.writeInbound(Unpooled.wrappedBuffer(new byte[] { 'A', 0 }));
-            ByteBuf buf = (ByteBuf) ch.readInbound();
+            ByteBuf buf = ch.readInbound();
             assertEquals("A", buf.toString(CharsetUtil.ISO_8859_1));
+
+            buf.release();
         }
     }
 
@@ -63,8 +65,10 @@ public class DelimiterBasedFrameDecoderTest {
             }
 
             ch.writeInbound(Unpooled.wrappedBuffer(new byte[] { 0, 'A', 0 }));
-            ByteBuf buf = (ByteBuf) ch.readInbound();
+            ByteBuf buf = ch.readInbound();
             assertEquals("A", buf.toString(CharsetUtil.ISO_8859_1));
+
+            buf.release();
         }
     }
 }

@@ -46,8 +46,20 @@ public interface SpdyDataFrame extends ByteBufHolder, SpdyStreamFrame {
     SpdyDataFrame duplicate();
 
     @Override
+    SpdyDataFrame retainedDuplicate();
+
+    @Override
+    SpdyDataFrame replace(ByteBuf content);
+
+    @Override
     SpdyDataFrame retain();
 
     @Override
     SpdyDataFrame retain(int increment);
+
+    @Override
+    SpdyDataFrame touch();
+
+    @Override
+    SpdyDataFrame touch(Object hint);
 }

@@ -45,13 +45,29 @@ public interface LastHttpContent extends HttpContent {
         }
 
         @Override
-        public HttpHeaders trailingHeaders() {
-            return HttpHeaders.EMPTY_HEADERS;
+        public LastHttpContent replace(ByteBuf content) {
+            return new DefaultLastHttpContent(content);
         }
 
         @Override
-        public DecoderResult getDecoderResult() {
+        public LastHttpContent retainedDuplicate() {
+            return this;
+        }
+
+        @Override
+        public HttpHeaders trailingHeaders() {
+            return EmptyHttpHeaders.INSTANCE;
+        }
+
+        @Override
+        public DecoderResult decoderResult() {
             return DecoderResult.SUCCESS;
+        }
+
+        @Override
+        @Deprecated
+        public DecoderResult getDecoderResult() {
+            return decoderResult();
         }
 
         @Override
@@ -75,6 +91,16 @@ public interface LastHttpContent extends HttpContent {
         }
 
         @Override
+        public LastHttpContent touch() {
+            return this;
+        }
+
+        @Override
+        public LastHttpContent touch(Object hint) {
+            return this;
+        }
+
+        @Override
         public boolean release() {
             return false;
         }
@@ -82,6 +108,11 @@ public interface LastHttpContent extends HttpContent {
         @Override
         public boolean release(int decrement) {
             return false;
+        }
+
+        @Override
+        public String toString() {
+            return "EmptyLastHttpContent";
         }
     };
 
@@ -91,8 +122,23 @@ public interface LastHttpContent extends HttpContent {
     LastHttpContent copy();
 
     @Override
+    LastHttpContent duplicate();
+
+    @Override
+    LastHttpContent retainedDuplicate();
+
+    @Override
+    LastHttpContent replace(ByteBuf content);
+
+    @Override
     LastHttpContent retain(int increment);
 
     @Override
     LastHttpContent retain();
+
+    @Override
+    LastHttpContent touch();
+
+    @Override
+    LastHttpContent touch(Object hint);
 }

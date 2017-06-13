@@ -20,9 +20,9 @@ import io.netty.channel.ChannelException;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.MessageSizeEstimator;
 import io.netty.channel.RecvByteBufAllocator;
+import io.netty.channel.WriteBufferWaterMark;
 import io.netty.channel.socket.DefaultSocketChannelConfig;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.SocketChannelConfig;
 
 import java.io.IOException;
 import java.net.Socket;
@@ -34,7 +34,12 @@ import static io.netty.channel.ChannelOption.*;
  * Default {@link OioSocketChannelConfig} implementation
  */
 public class DefaultOioSocketChannelConfig extends DefaultSocketChannelConfig implements OioSocketChannelConfig {
+    @Deprecated
     public DefaultOioSocketChannelConfig(SocketChannel channel, Socket javaSocket) {
+        super(channel, javaSocket);
+    }
+
+    DefaultOioSocketChannelConfig(OioSocketChannel channel, Socket javaSocket) {
         super(channel, javaSocket);
     }
 
@@ -134,7 +139,7 @@ public class DefaultOioSocketChannelConfig extends DefaultSocketChannelConfig im
 
     @Override
     public OioSocketChannelConfig setAllowHalfClosure(boolean allowHalfClosure) {
-        super.setAllowHalfClosure(true);
+        super.setAllowHalfClosure(allowHalfClosure);
         return this;
     }
 
@@ -145,6 +150,7 @@ public class DefaultOioSocketChannelConfig extends DefaultSocketChannelConfig im
     }
 
     @Override
+    @Deprecated
     public OioSocketChannelConfig setMaxMessagesPerRead(int maxMessagesPerRead) {
         super.setMaxMessagesPerRead(maxMessagesPerRead);
         return this;
@@ -175,6 +181,19 @@ public class DefaultOioSocketChannelConfig extends DefaultSocketChannelConfig im
     }
 
     @Override
+    protected void autoReadCleared() {
+        if (channel instanceof OioSocketChannel) {
+            ((OioSocketChannel) channel).clearReadPending0();
+        }
+    }
+
+    @Override
+    public OioSocketChannelConfig setAutoClose(boolean autoClose) {
+        super.setAutoClose(autoClose);
+        return this;
+    }
+
+    @Override
     public OioSocketChannelConfig setWriteBufferHighWaterMark(int writeBufferHighWaterMark) {
         super.setWriteBufferHighWaterMark(writeBufferHighWaterMark);
         return this;
@@ -183,6 +202,12 @@ public class DefaultOioSocketChannelConfig extends DefaultSocketChannelConfig im
     @Override
     public OioSocketChannelConfig setWriteBufferLowWaterMark(int writeBufferLowWaterMark) {
         super.setWriteBufferLowWaterMark(writeBufferLowWaterMark);
+        return this;
+    }
+
+    @Override
+    public OioSocketChannelConfig setWriteBufferWaterMark(WriteBufferWaterMark writeBufferWaterMark) {
+        super.setWriteBufferWaterMark(writeBufferWaterMark);
         return this;
     }
 

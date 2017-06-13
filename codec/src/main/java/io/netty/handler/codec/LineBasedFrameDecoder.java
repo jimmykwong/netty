@@ -17,6 +17,7 @@ package io.netty.handler.codec;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.util.ByteProcessor;
 
 import java.util.List;
 
@@ -100,10 +101,10 @@ public class LineBasedFrameDecoder extends ByteToMessageDecoder {
                 }
 
                 if (stripDelimiter) {
-                    frame = buffer.readBytes(length);
+                    frame = buffer.readRetainedSlice(length);
                     buffer.skipBytes(delimLength);
                 } else {
-                    frame = buffer.readBytes(length + delimLength);
+                    frame = buffer.readRetainedSlice(length + delimLength);
                 }
 
                 return frame;
@@ -130,7 +131,7 @@ public class LineBasedFrameDecoder extends ByteToMessageDecoder {
                     fail(ctx, length);
                 }
             } else {
-                discardedBytes = buffer.readableBytes();
+                discardedBytes += buffer.readableBytes();
                 buffer.readerIndex(buffer.writerIndex());
             }
             return null;
@@ -152,15 +153,10 @@ public class LineBasedFrameDecoder extends ByteToMessageDecoder {
      * Returns -1 if no end of line was found in the buffer.
      */
     private static int findEndOfLine(final ByteBuf buffer) {
-        final int n = buffer.writerIndex();
-        for (int i = buffer.readerIndex(); i < n; i ++) {
-            final byte b = buffer.getByte(i);
-            if (b == '\n') {
-                return i;
-            } else if (b == '\r' && i < n - 1 && buffer.getByte(i + 1) == '\n') {
-                return i;  // \r\n
-            }
+        int i = buffer.forEachByte(ByteProcessor.FIND_LF);
+        if (i > 0 && buffer.getByte(i - 1) == '\r') {
+            i--;
         }
-        return -1;  // Not found.
+        return i;
     }
 }

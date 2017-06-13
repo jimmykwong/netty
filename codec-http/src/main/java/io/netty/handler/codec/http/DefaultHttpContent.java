@@ -16,6 +16,7 @@
 package io.netty.handler.codec.http;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.util.internal.StringUtil;
 
 /**
  * The default {@link HttpContent} implementation.
@@ -41,12 +42,22 @@ public class DefaultHttpContent extends DefaultHttpObject implements HttpContent
 
     @Override
     public HttpContent copy() {
-        return new DefaultHttpContent(content.copy());
+        return replace(content.copy());
     }
 
     @Override
     public HttpContent duplicate() {
-        return new DefaultHttpContent(content.duplicate());
+        return replace(content.duplicate());
+    }
+
+    @Override
+    public HttpContent retainedDuplicate() {
+        return replace(content.retainedDuplicate());
+    }
+
+    @Override
+    public HttpContent replace(ByteBuf content) {
+        return new DefaultHttpContent(content);
     }
 
     @Override
@@ -67,6 +78,18 @@ public class DefaultHttpContent extends DefaultHttpObject implements HttpContent
     }
 
     @Override
+    public HttpContent touch() {
+        content.touch();
+        return this;
+    }
+
+    @Override
+    public HttpContent touch(Object hint) {
+        content.touch(hint);
+        return this;
+    }
+
+    @Override
     public boolean release() {
         return content.release();
     }
@@ -78,6 +101,7 @@ public class DefaultHttpContent extends DefaultHttpObject implements HttpContent
 
     @Override
     public String toString() {
-        return getClass().getSimpleName() + "(data: " + content() + ", getDecoderResult: " + getDecoderResult() + ')';
+        return StringUtil.simpleClassName(this) +
+               "(data: " + content() + ", decoderResult: " + decoderResult() + ')';
     }
 }

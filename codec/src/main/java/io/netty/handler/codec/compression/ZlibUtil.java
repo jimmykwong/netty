@@ -32,8 +32,8 @@ final class ZlibUtil {
         throw deflaterException(z, message, resultCode);
     }
 
-    static CompressionException inflaterException(Inflater z, String message, int resultCode) {
-        return new CompressionException(message + " (" + resultCode + ')' + (z.msg != null? ": " + z.msg : ""));
+    static DecompressionException inflaterException(Inflater z, String message, int resultCode) {
+        return new DecompressionException(message + " (" + resultCode + ')' + (z.msg != null? ": " + z.msg : ""));
     }
 
     static CompressionException deflaterException(Deflater z, String message, int resultCode) {
@@ -59,6 +59,25 @@ final class ZlibUtil {
             throw new Error();
         }
         return convertedWrapperType;
+    }
+
+    static int wrapperOverhead(ZlibWrapper wrapper) {
+        int overhead;
+        switch (wrapper) {
+        case NONE:
+            overhead = 0;
+            break;
+        case ZLIB:
+        case ZLIB_OR_NONE:
+            overhead = 2;
+            break;
+        case GZIP:
+            overhead = 10;
+            break;
+        default:
+            throw new Error();
+        }
+        return overhead;
     }
 
     private ZlibUtil() {

@@ -21,17 +21,32 @@ import io.netty.util.internal.PlatformDependent;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.Queue;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static io.netty.handler.codec.spdy.SpdyCodecUtil.*;
+
 final class SpdySession {
 
+    private final AtomicInteger activeLocalStreams  = new AtomicInteger();
+    private final AtomicInteger activeRemoteStreams = new AtomicInteger();
     private final Map<Integer, StreamState> activeStreams = PlatformDependent.newConcurrentHashMap();
+    private final StreamComparator streamComparator = new StreamComparator();
+    private final AtomicInteger sendWindowSize;
+    private final AtomicInteger receiveWindowSize;
 
-    int numActiveStreams() {
-        return activeStreams.size();
+    SpdySession(int sendWindowSize, int receiveWindowSize) {
+        this.sendWindowSize = new AtomicInteger(sendWindowSize);
+        this.receiveWindowSize = new AtomicInteger(receiveWindowSize);
+    }
+
+    int numActiveStreams(boolean remote) {
+        if (remote) {
+            return activeRemoteStreams.get();
+        } else {
+            return activeLocalStreams.get();
+        }
     }
 
     boolean noActiveStreams() {
@@ -43,23 +58,42 @@ final class SpdySession {
     }
 
     // Stream-IDs should be iterated in priority order
-    Set<Integer> getActiveStreams() {
-        TreeSet<Integer> streamIds = new TreeSet<Integer>(new PriorityComparator());
-        streamIds.addAll(activeStreams.keySet());
-        return streamIds;
+    Map<Integer, StreamState> activeStreams() {
+        Map<Integer, StreamState> streams = new TreeMap<Integer, StreamState>(streamComparator);
+        streams.putAll(activeStreams);
+        return streams;
     }
 
     void acceptStream(
             int streamId, byte priority, boolean remoteSideClosed, boolean localSideClosed,
-            int sendWindowSize, int receiveWindowSize) {
+            int sendWindowSize, int receiveWindowSize, boolean remote) {
         if (!remoteSideClosed || !localSideClosed) {
-            activeStreams.put(streamId, new StreamState(
+            StreamState state = activeStreams.put(streamId, new StreamState(
                     priority, remoteSideClosed, localSideClosed, sendWindowSize, receiveWindowSize));
+            if (state == null) {
+                if (remote) {
+                    activeRemoteStreams.incrementAndGet();
+                } else {
+                    activeLocalStreams.incrementAndGet();
+                }
+            }
         }
     }
 
-    void removeStream(int streamId, Throwable cause) {
+    private StreamState removeActiveStream(int streamId, boolean remote) {
         StreamState state = activeStreams.remove(streamId);
+        if (state != null) {
+            if (remote) {
+                activeRemoteStreams.decrementAndGet();
+            } else {
+                activeLocalStreams.decrementAndGet();
+            }
+        }
+        return state;
+    }
+
+    void removeStream(int streamId, Throwable cause, boolean remote) {
+        StreamState state = removeActiveStream(streamId, remote);
         if (state != null) {
             state.clearPendingWrites(cause);
         }
@@ -70,12 +104,12 @@ final class SpdySession {
         return state == null || state.isRemoteSideClosed();
     }
 
-    void closeRemoteSide(int streamId) {
+    void closeRemoteSide(int streamId, boolean remote) {
         StreamState state = activeStreams.get(streamId);
         if (state != null) {
             state.closeRemoteSide();
             if (state.isLocalSideClosed()) {
-                activeStreams.remove(streamId);
+                removeActiveStream(streamId, remote);
             }
         }
     }
@@ -85,12 +119,12 @@ final class SpdySession {
         return state == null || state.isLocalSideClosed();
     }
 
-    void closeLocalSide(int streamId) {
+    void closeLocalSide(int streamId, boolean remote) {
         StreamState state = activeStreams.get(streamId);
         if (state != null) {
             state.closeLocalSide();
             if (state.isRemoteSideClosed()) {
-                activeStreams.remove(streamId);
+                removeActiveStream(streamId, remote);
             }
         }
     }
@@ -112,24 +146,43 @@ final class SpdySession {
     }
 
     int getSendWindowSize(int streamId) {
+        if (streamId == SPDY_SESSION_STREAM_ID) {
+            return sendWindowSize.get();
+        }
+
         StreamState state = activeStreams.get(streamId);
         return state != null ? state.getSendWindowSize() : -1;
     }
 
     int updateSendWindowSize(int streamId, int deltaWindowSize) {
+        if (streamId == SPDY_SESSION_STREAM_ID) {
+            return sendWindowSize.addAndGet(deltaWindowSize);
+        }
+
         StreamState state = activeStreams.get(streamId);
         return state != null ? state.updateSendWindowSize(deltaWindowSize) : -1;
     }
 
     int updateReceiveWindowSize(int streamId, int deltaWindowSize) {
+        if (streamId == SPDY_SESSION_STREAM_ID) {
+            return receiveWindowSize.addAndGet(deltaWindowSize);
+        }
+
         StreamState state = activeStreams.get(streamId);
+        if (state == null) {
+            return -1;
+        }
         if (deltaWindowSize > 0) {
             state.setReceiveWindowSizeLowerBound(0);
         }
-        return state != null ? state.updateReceiveWindowSize(deltaWindowSize) : -1;
+        return state.updateReceiveWindowSize(deltaWindowSize);
     }
 
     int getReceiveWindowSizeLowerBound(int streamId) {
+        if (streamId == SPDY_SESSION_STREAM_ID) {
+            return 0;
+        }
+
         StreamState state = activeStreams.get(streamId);
         return state != null ? state.getReceiveWindowSizeLowerBound() : 0;
     }
@@ -155,6 +208,19 @@ final class SpdySession {
     }
 
     PendingWrite getPendingWrite(int streamId) {
+        if (streamId == SPDY_SESSION_STREAM_ID) {
+            for (Map.Entry<Integer, StreamState> e: activeStreams().entrySet()) {
+                StreamState state = e.getValue();
+                if (state.getSendWindowSize() > 0) {
+                    PendingWrite pendingWrite = state.getPendingWrite();
+                    if (pendingWrite != null) {
+                        return pendingWrite;
+                    }
+                }
+            }
+            return null;
+        }
+
         StreamState state = activeStreams.get(streamId);
         return state != null ? state.getPendingWrite() : null;
     }
@@ -256,12 +322,21 @@ final class SpdySession {
         }
     }
 
-    private final class PriorityComparator implements Comparator<Integer> {
+    private final class StreamComparator implements Comparator<Integer> {
+
+        StreamComparator() { }
+
         @Override
         public int compare(Integer id1, Integer id2) {
             StreamState state1 = activeStreams.get(id1);
             StreamState state2 = activeStreams.get(id2);
-            return state1.getPriority() - state2.getPriority();
+
+            int result = state1.getPriority() - state2.getPriority();
+            if (result != 0) {
+                return result;
+            }
+
+            return id1 - id2;
         }
     }
 

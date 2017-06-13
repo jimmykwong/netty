@@ -54,7 +54,7 @@ public class CloseWebSocketFrame extends WebSocketFrame {
      *            reserved bits used for protocol extensions
      */
     public CloseWebSocketFrame(boolean finalFragment, int rsv) {
-        this(finalFragment, rsv, null);
+        this(finalFragment, rsv, Unpooled.buffer(0));
     }
 
     /**
@@ -140,12 +140,22 @@ public class CloseWebSocketFrame extends WebSocketFrame {
 
     @Override
     public CloseWebSocketFrame copy() {
-        return new CloseWebSocketFrame(isFinalFragment(), rsv(), content().copy());
+        return (CloseWebSocketFrame) super.copy();
     }
 
     @Override
     public CloseWebSocketFrame duplicate() {
-        return new CloseWebSocketFrame(isFinalFragment(), rsv(), content().duplicate());
+        return (CloseWebSocketFrame) super.duplicate();
+    }
+
+    @Override
+    public CloseWebSocketFrame retainedDuplicate() {
+        return (CloseWebSocketFrame) super.retainedDuplicate();
+    }
+
+    @Override
+    public CloseWebSocketFrame replace(ByteBuf content) {
+        return new CloseWebSocketFrame(isFinalFragment(), rsv(), content);
     }
 
     @Override
@@ -157,6 +167,18 @@ public class CloseWebSocketFrame extends WebSocketFrame {
     @Override
     public CloseWebSocketFrame retain(int increment) {
         super.retain(increment);
+        return this;
+    }
+
+    @Override
+    public CloseWebSocketFrame touch() {
+        super.touch();
+        return this;
+    }
+
+    @Override
+    public CloseWebSocketFrame touch(Object hint) {
+        super.touch(hint);
         return this;
     }
 }

@@ -175,7 +175,7 @@ public class SnappyTest {
         ByteBuf input = Unpooled.wrappedBuffer(new byte[] {
                 'n', 'e', 't', 't', 'y'
         });
-        assertEquals(maskChecksum(0xddaa8ce6), calculateChecksum(input));
+        assertEquals(maskChecksum(0xd6cb8b55), calculateChecksum(input));
     }
 
     @Test
@@ -184,7 +184,7 @@ public class SnappyTest {
                 'y', 't', 't', 'e', 'n'
         });
 
-        validateChecksum(maskChecksum(0x37c55159), input);
+        validateChecksum(maskChecksum(0x2d4d3535), input);
     }
 
     @Test(expected = DecompressionException.class)
@@ -193,6 +193,34 @@ public class SnappyTest {
                 'y', 't', 't', 'e', 'n'
         });
 
-        validateChecksum(maskChecksum(0xddaa8ce6), input);
+        validateChecksum(maskChecksum(0xd6cb8b55), input);
+    }
+
+    @Test
+    public void testEncodeLiteralAndDecodeLiteral() {
+        int[] lengths = new int[] {
+            0x11, // default
+            0x100, // case 60
+            0x1000, // case 61
+            0x100000, // case 62
+            0x1000001 // case 63
+        };
+        for (int len : lengths) {
+            ByteBuf in = Unpooled.wrappedBuffer(new byte[len]);
+            ByteBuf encoded = Unpooled.buffer(10);
+            ByteBuf decoded = Unpooled.buffer(10);
+            ByteBuf expected = Unpooled.wrappedBuffer(new byte[len]);
+            try {
+                Snappy.encodeLiteral(in, encoded, len);
+                byte tag = encoded.readByte();
+                Snappy.decodeLiteral(tag, encoded, decoded);
+                assertEquals("Encoded or decoded literal was incorrect", expected, decoded);
+            } finally {
+                in.release();
+                encoded.release();
+                decoded.release();
+                expected.release();
+            }
+        }
     }
 }

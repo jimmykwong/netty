@@ -17,9 +17,10 @@
 package io.netty.buffer;
 
 import io.netty.util.IllegalReferenceCountException;
-import io.netty.util.internal.PlatformDependent;
 
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+
+import static io.netty.util.internal.ObjectUtil.checkPositive;
 
 /**
  * Abstract base class for {@link ByteBuf} implementations that count references.
@@ -29,23 +30,6 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
     private static final AtomicIntegerFieldUpdater<AbstractReferenceCountedByteBuf> refCntUpdater =
             AtomicIntegerFieldUpdater.newUpdater(AbstractReferenceCountedByteBuf.class, "refCnt");
 
-    private static final long REFCNT_FIELD_OFFSET;
-
-    static {
-        long refCntFieldOffset = -1;
-        try {
-            if (PlatformDependent.hasUnsafe()) {
-                refCntFieldOffset = PlatformDependent.objectFieldOffset(
-                        AbstractReferenceCountedByteBuf.class.getDeclaredField("refCnt"));
-            }
-        } catch (Throwable t) {
-            // Ignored
-        }
-
-        REFCNT_FIELD_OFFSET = refCntFieldOffset;
-    }
-
-    @SuppressWarnings("FieldMayBeFinal")
     private volatile int refCnt = 1;
 
     protected AbstractReferenceCountedByteBuf(int maxCapacity) {
@@ -53,13 +37,8 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
     }
 
     @Override
-    public final int refCnt() {
-        if (REFCNT_FIELD_OFFSET >= 0) {
-            // Try to do non-volatile read for performance.
-            return PlatformDependent.getInt(this, REFCNT_FIELD_OFFSET);
-        } else {
-            return refCnt;
-        }
+    public int refCnt() {
+        return refCnt;
     }
 
     /**
@@ -71,36 +50,24 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
 
     @Override
     public ByteBuf retain() {
-        for (;;) {
-            int refCnt = this.refCnt;
-            if (refCnt == 0) {
-                throw new IllegalReferenceCountException(0, 1);
-            }
-            if (refCnt == Integer.MAX_VALUE) {
-                throw new IllegalReferenceCountException(Integer.MAX_VALUE, 1);
-            }
-            if (refCntUpdater.compareAndSet(this, refCnt, refCnt + 1)) {
-                break;
-            }
-        }
-        return this;
+        return retain0(1);
     }
 
     @Override
     public ByteBuf retain(int increment) {
-        if (increment <= 0) {
-            throw new IllegalArgumentException("increment: " + increment + " (expected: > 0)");
-        }
+        return retain0(checkPositive(increment, "increment"));
+    }
 
+    private ByteBuf retain0(int increment) {
         for (;;) {
             int refCnt = this.refCnt;
-            if (refCnt == 0) {
-                throw new IllegalReferenceCountException(0, increment);
-            }
-            if (refCnt > Integer.MAX_VALUE - increment) {
+            final int nextCnt = refCnt + increment;
+
+            // Ensure we not resurrect (which means the refCnt was 0) and also that we encountered an overflow.
+            if (nextCnt <= increment) {
                 throw new IllegalReferenceCountException(refCnt, increment);
             }
-            if (refCntUpdater.compareAndSet(this, refCnt, refCnt + increment)) {
+            if (refCntUpdater.compareAndSet(this, refCnt, nextCnt)) {
                 break;
             }
         }
@@ -108,29 +75,26 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
     }
 
     @Override
-    public final boolean release() {
-        for (;;) {
-            int refCnt = this.refCnt;
-            if (refCnt == 0) {
-                throw new IllegalReferenceCountException(0, -1);
-            }
-
-            if (refCntUpdater.compareAndSet(this, refCnt, refCnt - 1)) {
-                if (refCnt == 1) {
-                    deallocate();
-                    return true;
-                }
-                return false;
-            }
-        }
+    public ByteBuf touch() {
+        return this;
     }
 
     @Override
-    public final boolean release(int decrement) {
-        if (decrement <= 0) {
-            throw new IllegalArgumentException("decrement: " + decrement + " (expected: > 0)");
-        }
+    public ByteBuf touch(Object hint) {
+        return this;
+    }
 
+    @Override
+    public boolean release() {
+        return release0(1);
+    }
+
+    @Override
+    public boolean release(int decrement) {
+        return release0(checkPositive(decrement, "decrement"));
+    }
+
+    private boolean release0(int decrement) {
         for (;;) {
             int refCnt = this.refCnt;
             if (refCnt < decrement) {
@@ -146,7 +110,6 @@ public abstract class AbstractReferenceCountedByteBuf extends AbstractByteBuf {
             }
         }
     }
-
     /**
      * Called once {@link #refCnt()} is equals 0.
      */

@@ -29,12 +29,12 @@ import io.netty.util.internal.EmptyArrays;
 
 import java.util.concurrent.TimeUnit;
 
-
 /**
  * Compresses a {@link ByteBuf} using the deflate algorithm.
  */
 public class JZlibEncoder extends ZlibEncoder {
 
+    private final int wrapperOverhead;
     private final Deflater z = new Deflater();
     private volatile boolean finished;
     private volatile ChannelHandlerContext ctx;
@@ -145,6 +145,8 @@ public class JZlibEncoder extends ZlibEncoder {
         if (resultCode != JZlib.Z_OK) {
             ZlibUtil.fail(z, "initialization failure", resultCode);
         }
+
+        wrapperOverhead = ZlibUtil.wrapperOverhead(wrapper);
     }
 
     /**
@@ -233,6 +235,8 @@ public class JZlibEncoder extends ZlibEncoder {
                 ZlibUtil.fail(z, "failed to set the dictionary", resultCode);
             }
         }
+
+        wrapperOverhead = ZlibUtil.wrapperOverhead(ZlibWrapper.ZLIB);
     }
 
     @Override
@@ -275,12 +279,17 @@ public class JZlibEncoder extends ZlibEncoder {
     @Override
     protected void encode(ChannelHandlerContext ctx, ByteBuf in, ByteBuf out) throws Exception {
         if (finished) {
+            out.writeBytes(in);
+            return;
+        }
+
+        int inputLength = in.readableBytes();
+        if (inputLength == 0) {
             return;
         }
 
         try {
             // Configure input.
-            int inputLength = in.readableBytes();
             boolean inHasArray = in.hasArray();
             z.avail_in = inputLength;
             if (inHasArray) {
@@ -295,7 +304,7 @@ public class JZlibEncoder extends ZlibEncoder {
             int oldNextInIndex = z.next_in_index;
 
             // Configure output.
-            int maxOutputLength = (int) Math.ceil(inputLength * 1.001) + 12;
+            int maxOutputLength = (int) Math.ceil(inputLength * 1.001) + 12 + wrapperOverhead;
             out.ensureWritable(maxOutputLength);
             z.avail_out = maxOutputLength;
             z.next_out = out.array();

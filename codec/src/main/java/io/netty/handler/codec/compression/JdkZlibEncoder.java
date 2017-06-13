@@ -27,13 +27,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.zip.CRC32;
 import java.util.zip.Deflater;
 
-
 /**
  * Compresses a {@link ByteBuf} using the deflate algorithm.
  */
 public class JdkZlibEncoder extends ZlibEncoder {
 
-    private final byte[] encodeBuf = new byte[8192];
+    private final ZlibWrapper wrapper;
     private final Deflater deflater;
     private volatile boolean finished;
     private volatile ChannelHandlerContext ctx;
@@ -41,7 +40,6 @@ public class JdkZlibEncoder extends ZlibEncoder {
     /*
      * GZIP support
      */
-    private final boolean gzip;
     private final CRC32 crc = new CRC32();
     private static final byte[] gzipHeader = {0x1f, (byte) 0x8b, Deflater.DEFLATED, 0, 0, 0, 0, 0, 0, 0};
     private boolean writeHeader = true;
@@ -106,7 +104,7 @@ public class JdkZlibEncoder extends ZlibEncoder {
                     "allowed for compression.");
         }
 
-        gzip = wrapper == ZlibWrapper.GZIP;
+        this.wrapper = wrapper;
         deflater = new Deflater(compressionLevel, wrapper != ZlibWrapper.ZLIB);
     }
 
@@ -147,7 +145,7 @@ public class JdkZlibEncoder extends ZlibEncoder {
             throw new NullPointerException("dictionary");
         }
 
-        gzip = false;
+        wrapper = ZlibWrapper.ZLIB;
         deflater = new Deflater(compressionLevel);
         deflater.setDictionary(dictionary);
     }
@@ -196,25 +194,57 @@ public class JdkZlibEncoder extends ZlibEncoder {
             return;
         }
 
-        byte[] inAry = new byte[uncompressed.readableBytes()];
-        uncompressed.readBytes(inAry);
+        int len = uncompressed.readableBytes();
+        if (len == 0) {
+            return;
+        }
 
-        int sizeEstimate = (int) Math.ceil(inAry.length * 1.001) + 12;
-        out.ensureWritable(sizeEstimate);
+        int offset;
+        byte[] inAry;
+        if (uncompressed.hasArray()) {
+            // if it is backed by an array we not need to to do a copy at all
+            inAry = uncompressed.array();
+            offset = uncompressed.arrayOffset() + uncompressed.readerIndex();
+            // skip all bytes as we will consume all of them
+            uncompressed.skipBytes(len);
+        } else {
+            inAry = new byte[len];
+            uncompressed.readBytes(inAry);
+            offset = 0;
+        }
 
-        if (gzip) {
-            crc.update(inAry);
-            if (writeHeader) {
+        if (writeHeader) {
+            writeHeader = false;
+            if (wrapper == ZlibWrapper.GZIP) {
                 out.writeBytes(gzipHeader);
-                writeHeader = false;
             }
         }
 
-        deflater.setInput(inAry);
-        while (!deflater.needsInput()) {
-            int numBytes = deflater.deflate(encodeBuf, 0, encodeBuf.length, Deflater.SYNC_FLUSH);
-            out.writeBytes(encodeBuf, 0, numBytes);
+        if (wrapper == ZlibWrapper.GZIP) {
+            crc.update(inAry, offset, len);
         }
+
+        deflater.setInput(inAry, offset, len);
+        while (!deflater.needsInput()) {
+            deflate(out);
+        }
+    }
+
+    @Override
+    protected final ByteBuf allocateBuffer(ChannelHandlerContext ctx, ByteBuf msg,
+                                           boolean preferDirect) throws Exception {
+        int sizeEstimate = (int) Math.ceil(msg.readableBytes() * 1.001) + 12;
+        if (writeHeader) {
+            switch (wrapper) {
+                case GZIP:
+                    sizeEstimate += gzipHeader.length;
+                    break;
+                case ZLIB:
+                    sizeEstimate += 2; // first two magic bytes
+                    break;
+            }
+        }
+        return ctx.alloc().heapBuffer(sizeEstimate);
     }
 
     @Override
@@ -245,13 +275,24 @@ public class JdkZlibEncoder extends ZlibEncoder {
         }
 
         finished = true;
-        ByteBuf footer = ctx.alloc().buffer();
-        deflater.finish();
-        while (!deflater.finished()) {
-            int numBytes = deflater.deflate(encodeBuf, 0, encodeBuf.length);
-            footer.writeBytes(encodeBuf, 0, numBytes);
+        ByteBuf footer = ctx.alloc().heapBuffer();
+        if (writeHeader && wrapper == ZlibWrapper.GZIP) {
+            // Write the GZIP header first if not written yet. (i.e. user wrote nothing.)
+            writeHeader = false;
+            footer.writeBytes(gzipHeader);
         }
-        if (gzip) {
+
+        deflater.finish();
+
+        while (!deflater.finished()) {
+            deflate(footer);
+            if (!footer.isWritable()) {
+                // no more space so write it to the channel and continue
+                ctx.write(footer);
+                footer = ctx.alloc().heapBuffer();
+            }
+        }
+        if (wrapper == ZlibWrapper.GZIP) {
             int crcValue = (int) crc.getValue();
             int uncBytes = deflater.getTotalIn();
             footer.writeByte(crcValue);
@@ -265,6 +306,16 @@ public class JdkZlibEncoder extends ZlibEncoder {
         }
         deflater.end();
         return ctx.writeAndFlush(footer, promise);
+    }
+
+    private void deflate(ByteBuf out) {
+        int numBytes;
+        do {
+            int writerIndex = out.writerIndex();
+            numBytes = deflater.deflate(
+                    out.array(), out.arrayOffset() + writerIndex, out.writableBytes(), Deflater.SYNC_FLUSH);
+            out.writerIndex(writerIndex + numBytes);
+        } while (numBytes > 0);
     }
 
     @Override

@@ -15,6 +15,8 @@
  */
 package io.netty.channel;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.socket.DatagramChannel;
 import io.netty.channel.socket.DatagramPacket;
 import io.netty.channel.socket.ServerSocketChannel;
@@ -65,11 +67,22 @@ import java.net.SocketAddress;
  * transport.  Down-cast the {@link Channel} to sub-type to invoke such
  * operations.  For example, with the old I/O datagram transport, multicast
  * join / leave operations are provided by {@link DatagramChannel}.
+ *
+ * <h3>Release resources</h3>
+ * <p>
+ * It is important to call {@link #close()} or {@link #close(ChannelPromise)} to release all
+ * resources once you are done with the {@link Channel}. This ensures all resources are
+ * released in a proper way, i.e. filehandles.
  */
-public interface Channel extends AttributeMap, ChannelOutboundInvoker, ChannelPropertyAccess, Comparable<Channel> {
+public interface Channel extends AttributeMap, ChannelOutboundInvoker, Comparable<Channel> {
 
     /**
-     * Return the {@link EventLoop} this {@link Channel} was registered too.
+     * Returns the globally unique identifier of this {@link Channel}.
+     */
+    ChannelId id();
+
+    /**
+     * Return the {@link EventLoop} this {@link Channel} was registered to.
      */
     EventLoop eventLoop();
 
@@ -87,7 +100,7 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, ChannelPr
     ChannelConfig config();
 
     /**
-     * Returns {@code true} if the {@link Channel} is open an may get active later
+     * Returns {@code true} if the {@link Channel} is open and may get active later
      */
     boolean isOpen();
 
@@ -147,16 +160,38 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, ChannelPr
      */
     boolean isWritable();
 
-    @Override
-    Channel flush();
+    /**
+     * Get how many bytes can be written until {@link #isWritable()} returns {@code false}.
+     * This quantity will always be non-negative. If {@link #isWritable()} is {@code false} then 0.
+     */
+    long bytesBeforeUnwritable();
 
-    @Override
-    Channel read();
+    /**
+     * Get how many bytes must be drained from underlying buffers until {@link #isWritable()} returns {@code true}.
+     * This quantity will always be non-negative. If {@link #isWritable()} is {@code true} then 0.
+     */
+    long bytesBeforeWritable();
 
     /**
      * Returns an <em>internal-use-only</em> object that provides unsafe operations.
      */
     Unsafe unsafe();
+
+    /**
+     * Return the assigned {@link ChannelPipeline}.
+     */
+    ChannelPipeline pipeline();
+
+    /**
+     * Return the assigned {@link ByteBufAllocator} which will be used to allocate {@link ByteBuf}s.
+     */
+    ByteBufAllocator alloc();
+
+    @Override
+    Channel read();
+
+    @Override
+    Channel flush();
 
     /**
      * <em>Unsafe</em> operations that should <em>never</em> be called from user-code. These methods
@@ -167,10 +202,18 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, ChannelPr
      *   <li>{@link #remoteAddress()}</li>
      *   <li>{@link #closeForcibly()}</li>
      *   <li>{@link #register(EventLoop, ChannelPromise)}</li>
+     *   <li>{@link #deregister(ChannelPromise)}</li>
      *   <li>{@link #voidPromise()}</li>
      * </ul>
      */
     interface Unsafe {
+
+        /**
+         * Return the assigned {@link RecvByteBufAllocator.Handle} which will be used to allocate {@link ByteBuf}'s when
+         * receiving data.
+         */
+        RecvByteBufAllocator.Handle recvBufAllocHandle();
+
         /**
          * Return the {@link SocketAddress} to which is bound local or
          * {@code null} if none.
@@ -184,7 +227,7 @@ public interface Channel extends AttributeMap, ChannelOutboundInvoker, ChannelPr
         SocketAddress remoteAddress();
 
         /**
-         * Register the {@link Channel} of the {@link ChannelPromise} with the {@link EventLoop} and notify
+         * Register the {@link Channel} of the {@link ChannelPromise} and notify
          * the {@link ChannelFuture} once the registration was complete.
          */
         void register(EventLoop eventLoop, ChannelPromise promise);

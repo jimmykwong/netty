@@ -20,6 +20,7 @@ import io.netty.channel.ChannelConfig;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.MessageSizeEstimator;
 import io.netty.channel.RecvByteBufAllocator;
+import io.netty.channel.WriteBufferWaterMark;
 
 import java.net.InetAddress;
 import java.net.NetworkInterface;
@@ -157,6 +158,7 @@ public interface DatagramChannelConfig extends ChannelConfig {
     DatagramChannelConfig setNetworkInterface(NetworkInterface networkInterface);
 
     @Override
+    @Deprecated
     DatagramChannelConfig setMaxMessagesPerRead(int maxMessagesPerRead);
 
     @Override
@@ -175,5 +177,12 @@ public interface DatagramChannelConfig extends ChannelConfig {
     DatagramChannelConfig setAutoRead(boolean autoRead);
 
     @Override
+    DatagramChannelConfig setAutoClose(boolean autoClose);
+
+    @Override
     DatagramChannelConfig setMessageSizeEstimator(MessageSizeEstimator estimator);
+
+    @Override
+    DatagramChannelConfig setWriteBufferWaterMark(WriteBufferWaterMark writeBufferWaterMark);
+
 }

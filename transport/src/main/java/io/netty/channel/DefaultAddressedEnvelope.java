@@ -43,6 +43,10 @@ public class DefaultAddressedEnvelope<M, A extends SocketAddress> implements Add
             throw new NullPointerException("message");
         }
 
+        if (recipient == null && sender == null) {
+            throw new NullPointerException("recipient and sender");
+        }
+
         this.message = message;
         this.sender = sender;
         this.recipient = recipient;
@@ -100,6 +104,18 @@ public class DefaultAddressedEnvelope<M, A extends SocketAddress> implements Add
     @Override
     public boolean release(int decrement) {
         return ReferenceCountUtil.release(message, decrement);
+    }
+
+    @Override
+    public AddressedEnvelope<M, A> touch() {
+        ReferenceCountUtil.touch(message);
+        return this;
+    }
+
+    @Override
+    public AddressedEnvelope<M, A> touch(Object hint) {
+        ReferenceCountUtil.touch(message, hint);
+        return this;
     }
 
     @Override

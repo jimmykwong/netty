@@ -18,13 +18,21 @@ package io.netty.channel.rxtx;
 import gnu.io.CommPort;
 import gnu.io.CommPortIdentifier;
 import gnu.io.SerialPort;
+import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.oio.OioByteStreamChannel;
 
 import java.net.SocketAddress;
 import java.util.concurrent.TimeUnit;
 
-import static io.netty.channel.rxtx.RxtxChannelOption.*;
+import static io.netty.channel.rxtx.RxtxChannelOption.BAUD_RATE;
+import static io.netty.channel.rxtx.RxtxChannelOption.DATA_BITS;
+import static io.netty.channel.rxtx.RxtxChannelOption.DTR;
+import static io.netty.channel.rxtx.RxtxChannelOption.PARITY_BIT;
+import static io.netty.channel.rxtx.RxtxChannelOption.READ_TIMEOUT;
+import static io.netty.channel.rxtx.RxtxChannelOption.RTS;
+import static io.netty.channel.rxtx.RxtxChannelOption.STOP_BITS;
+import static io.netty.channel.rxtx.RxtxChannelOption.WAIT_TIME;
 
 /**
  * A channel to a serial device using the RXTX library.
@@ -65,7 +73,7 @@ public class RxtxChannel extends OioByteStreamChannel {
         RxtxDeviceAddress remote = (RxtxDeviceAddress) remoteAddress;
         final CommPortIdentifier cpi = CommPortIdentifier.getPortIdentifier(remote.value());
         final CommPort commPort = cpi.open(getClass().getName(), 1000);
-
+        commPort.enableReceiveTimeout(config().getOption(READ_TIMEOUT));
         deviceAddress = remote;
 
         serialPort = (SerialPort) commPort;
@@ -128,12 +136,22 @@ public class RxtxChannel extends OioByteStreamChannel {
         }
     }
 
+    @Override
+    protected boolean isInputShutdown() {
+        return !open;
+    }
+
+    @Override
+    protected ChannelFuture shutdownInput() {
+        return newFailedFuture(new UnsupportedOperationException("shutdownInput"));
+    }
+
     private final class RxtxUnsafe extends AbstractUnsafe {
         @Override
         public void connect(
                 final SocketAddress remoteAddress,
                 final SocketAddress localAddress, final ChannelPromise promise) {
-            if (!ensureOpen(promise)) {
+            if (!promise.setUncancellable() || !ensureOpen(promise)) {
                 return;
             }
 
@@ -148,25 +166,25 @@ public class RxtxChannel extends OioByteStreamChannel {
                         public void run() {
                             try {
                                 doInit();
-                                promise.setSuccess();
+                                safeSetSuccess(promise);
                                 if (!wasActive && isActive()) {
                                     pipeline().fireChannelActive();
                                 }
                             } catch (Throwable t) {
-                                promise.setFailure(t);
+                                safeSetFailure(promise, t);
                                 closeIfClosed();
                             }
                         }
                    }, waitTime, TimeUnit.MILLISECONDS);
                 } else {
                     doInit();
-                    promise.setSuccess();
+                    safeSetSuccess(promise);
                     if (!wasActive && isActive()) {
                         pipeline().fireChannelActive();
                     }
                 }
             } catch (Throwable t) {
-                promise.setFailure(t);
+                safeSetFailure(promise, t);
                 closeIfClosed();
             }
         }

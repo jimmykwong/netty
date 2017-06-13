@@ -1,5 +1,5 @@
 /*
- * Copyright 2012 The Netty Project
+ * Copyright 2016 The Netty Project
  *
  * The Netty Project licenses this file to you under the Apache License,
  * version 2.0 (the "License"); you may not use this file except in compliance
@@ -15,11 +15,7 @@
  */
 package io.netty.channel;
 
-
-/**
- * Interface which is shared by others which need to fire inbound events
- */
-interface ChannelInboundInvoker {
+public interface ChannelInboundInvoker {
 
     /**
      * A {@link Channel} was registered to its {@link EventLoop}.
@@ -84,6 +80,10 @@ interface ChannelInboundInvoker {
      */
     ChannelInboundInvoker fireChannelRead(Object msg);
 
+    /**
+     * Triggers an {@link ChannelInboundHandler#channelReadComplete(ChannelHandlerContext)}
+     * event to the next {@link ChannelInboundHandler} in the {@link ChannelPipeline}.
+     */
     ChannelInboundInvoker fireChannelReadComplete();
 
     /**
